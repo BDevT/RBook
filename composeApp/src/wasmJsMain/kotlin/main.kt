@@ -5,6 +5,13 @@ import kotlinx.browser.document
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
     ComposeViewport(document.body!!) {
-        App()
+        val sampleDesks = listOf(
+            Desk(id = 1, name = "Desk 1", isBooked = false),
+            Desk(id = 2, name = "Desk 2", isBooked = false),
+            Desk(id = 3, name = "Desk 3", isBooked = true),
+            Desk(id = 4, name = "Desk 4", isBooked = false),
+            Desk(id = 5, name = "Desk 5", isBooked = true)
+        )
+        DeskBookingApp(initialDesks = sampleDesks)
     }
 }
