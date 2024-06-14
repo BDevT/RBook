@@ -25,12 +25,12 @@ kotlin {
         }
         binaries.executable()
     }
-    
+
     jvm("desktop")
-    
+
     sourceSets {
         val desktopMain by getting
-        
+
         commonMain.dependencies {
             implementation(compose.runtime)
             implementation(compose.foundation)
@@ -52,8 +52,13 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "hartree.rse.rbook"
+            packageName = "rbook"
             packageVersion = "1.0.0"
+
+            windows {
+                menuGroup = "rbook"
+                shortcut = true
+            }
         }
     }
 }
