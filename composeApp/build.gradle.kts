@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.jetbrainsCompose)
     alias(libs.plugins.compose.compiler)
+    kotlin("plugin.serialization") version "2.0.0"
 }
 
 kotlin {
@@ -25,12 +26,12 @@ kotlin {
         }
         binaries.executable()
     }
-    
+
     jvm("desktop")
-    
+
     sourceSets {
         val desktopMain by getting
-        
+
         commonMain.dependencies {
             implementation(compose.runtime)
             implementation(compose.foundation)
@@ -38,6 +39,15 @@ kotlin {
             implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
+            implementation("ch.qos.logback:logback-classic:1.5.6")
+            implementation("io.ktor:ktor-client-core:2.3.11")
+            implementation("io.ktor:ktor-client-cio:2.3.11")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+            implementation("io.github.epicarchitect:calendar-compose-basis:1.0.5")
+            implementation("io.github.epicarchitect:calendar-compose-ranges:1.0.5") // includes basis
+            implementation("io.github.epicarchitect:calendar-compose-pager:1.0.5") // includes basis
+            implementation("io.github.epicarchitect:calendar-compose-datepicker:1.0.5") // includes pager + ranges
         }
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
@@ -52,8 +62,13 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "hartree.rse.rbook"
+            packageName = "rbook"
             packageVersion = "1.0.0"
+
+            windows {
+                menuGroup = "rbook"
+                shortcut = true
+            }
         }
     }
 }
