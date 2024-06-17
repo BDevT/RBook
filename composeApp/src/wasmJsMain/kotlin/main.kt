@@ -12,6 +12,6 @@ fun main() {
             Desk(id = 4, name = "Desk 4", isBooked = false),
             Desk(id = 5, name = "Desk 5", isBooked = true)
         )
-        DeskBookingApp(initialDesks = sampleDesks)
+        App(initialDesks = sampleDesks)
     }
 }

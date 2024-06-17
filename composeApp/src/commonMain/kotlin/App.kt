@@ -1,69 +1,99 @@
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.Text
 import androidx.compose.material.Button
-import androidx.compose.material.OutlinedTextField
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
+import androidx.compose.ui.layout.onGloballyPositioned
+import kotlinx.coroutines.*
+import kotlinx.datetime.LocalDate
+import kotlinx.serialization.Serializable
+import io.ktor.client.*
+import io.ktor.client.plugins.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.http.*
+import io.ktor.client.statement.*
+import kotlinx.serialization.json.Json
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.unit.IntSize
 
-data class Desk(val id: Int, val name: String, var isBooked: Boolean)
+@Serializable
+data class Desk(
+    val id: Int,
+    val name: String,
+    val physical_location: String,
+    val virtual_location_x: Float,
+    val virtual_location_y: Float,
+    val length: Float,
+    val width: Float
+)
+
+@Serializable
+data class Booking(
+    val id: Int,
+    val desk_id: Int,
+    val booked_by: String,
+    val booked_date: String
+)
+
+@Serializable
+data class BookingRequest(val user: String, val booking_date: String) {
+    fun toJsonString(): String {
+        return """{"user":"$user","booking_date":"$booking_date"}"""
+    }
+}
 
 @Composable
-fun DeskBookingApp(initialDesks: List<Desk>) {
-    var deskList by remember { mutableStateOf(initialDesks) }
-    var showDialog by remember { mutableStateOf(false) }
+fun App() {
+    var deskList by remember { mutableStateOf(emptyList<Desk>()) }
+    var bookings by remember { mutableStateOf(emptyList<Booking>()) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    LaunchedEffect(Unit) {
+        deskList = fetchDesks()
+        bookings = fetchBookings()
+    }
 
     MaterialTheme {
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = { Text("Desk Booking System") },
-                    actions = {
-                        Button(onClick = { showDialog = true }) {
-                            Text("Sign In")
-                        }
-                    }
                 )
             },
             content = { padding ->
-                Column(
-                    Modifier
+                Box(
+                    modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 128.dp),
-                        contentPadding = PaddingValues(8.dp)
-                    ) {
-                        items(deskList) { desk ->
-                            DeskItem(desk = desk, onBook = {
-                                bookDesk(deskList, desk.id) { updatedDesks ->
-                                    deskList = updatedDesks
-                                }
-                            })
+                        .onGloballyPositioned { coordinates ->
+                            containerSize = coordinates.size
                         }
+                ) {
+                    deskList.forEach { desk ->
+                        val isBooked = bookings.any { it.desk_id == desk.id }
+                        val offsetX = containerSize.width * desk.virtual_location_x
+                        val offsetY = containerSize.height * (1 - desk.virtual_location_y)
+                        deskItem(
+                            desk = desk,
+                            isBooked = isBooked,
+                            onBook = {
+                                CoroutineScope(Dispatchers.Default).launch {
+                                    bookDesk(desk.id)
+                                    deskList = fetchDesks()
+                                    bookings = fetchBookings()
+                                }
+                            },
+                            modifier = Modifier
+                                .offset(
+                                    x = offsetX.dp,
+                                    y = offsetY.dp
+                                )
+                        )
                     }
-                }
-
-                if (showDialog) {
-                    SignInDialog(onDismiss = { showDialog = false })
                 }
             }
         )
@@ -71,11 +101,11 @@ fun DeskBookingApp(initialDesks: List<Desk>) {
 }
 
 @Composable
-fun DeskItem(desk: Desk, onBook: () -> Unit) {
+fun deskItem(desk: Desk, isBooked: Boolean, onBook: suspend () -> Unit, modifier: Modifier = Modifier) {
     Card(
-        modifier = Modifier
-            .padding(8.dp)
-            .fillMaxWidth(),
+        modifier = modifier
+            .size(desk.length.dp * 100, desk.width.dp * 100)
+            .padding(0.dp),
         elevation = 4.dp
     ) {
         Column(
@@ -85,81 +115,72 @@ fun DeskItem(desk: Desk, onBook: () -> Unit) {
         ) {
             Text(text = desk.name, style = MaterialTheme.typography.h6)
             Text(
-                text = if (desk.isBooked) "Booked" else "Available",
+                text = if (isBooked) "Booked" else "Available",
                 style = MaterialTheme.typography.body2,
-                color = if (desk.isBooked) MaterialTheme.colors.error else MaterialTheme.colors.primary
+                color = if (isBooked) MaterialTheme.colors.error else MaterialTheme.colors.primary
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onBook, enabled = !desk.isBooked) {
-                Text(text = if (desk.isBooked) "Booked" else "Book")
+            Button(onClick = { CoroutineScope(Dispatchers.Default).launch { onBook() } }, enabled = !isBooked) {
+                Text(text = if (isBooked) "Booked" else "Book")
             }
         }
     }
 }
 
-fun bookDesk(desks: List<Desk>, deskId: Int, updateDesks: (List<Desk>) -> Unit) {
-    val updatedDesks = desks.map { desk ->
-        if (desk.id == deskId) {
-            desk.copy(isBooked = true)
-        } else {
-            desk
-        }
+suspend fun fetchDesks(): List<Desk> {
+    val client = HttpClient()
+
+    return try {
+        val response: HttpResponse = client.get("http://localhost:8000/desks")
+        val responseBody: String = response.bodyAsText()
+        Json.decodeFromString(responseBody)
+    } catch (e: Exception) {
+        emptyList()
+    } finally {
+        client.close()
     }
-    updateDesks(updatedDesks)
 }
 
-@Composable
-fun SignInDialog(onDismiss: () -> Unit) {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+suspend fun fetchBookings(): List<Booking> {
+    val client = HttpClient()
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Sign In") },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Email") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Email,
-                        imeAction = ImeAction.Next
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+    return try {
+        val response: HttpResponse = client.get("http://localhost:8000/bookings?booking_date=${getCurrentDate()}")
+        val responseBody: String = response.bodyAsText()
+        Json.decodeFromString(responseBody)
+    } catch (e: Exception) {
+        emptyList()
+    } finally {
+        client.close()
+    }
+}
 
-                Spacer(modifier = Modifier.height(16.dp))
+fun getCurrentDate(): String {
+    return LocalDate(2024, 6, 16).toString()
+}
 
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                Button(
-                    onClick = { /* Handle login button click */ },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(text = "Log in")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
-            }
+suspend fun bookDesk(deskId: Int) {
+    val client = HttpClient() {
+        defaultRequest {
+            url("http://localhost:8000")
         }
-    )
+        install(ContentNegotiation) {
+            Json { ignoreUnknownKeys = true }
+        }
+    }
+
+    try {
+        val bookingRequest = BookingRequest("default_user", getCurrentDate())
+        val bookingStr: String = bookingRequest.toJsonString()
+        println(bookingRequest.booking_date)
+        val response = client.post("/desks/$deskId/book") {
+            contentType(ContentType.Application.Json)
+            setBody(bookingStr)
+        }
+        println("Booking response: $response")
+    } catch (e: Exception) {
+        println("Error: ${e.message}")
+    } finally {
+        client.close()
+    }
 }
