@@ -40,14 +40,9 @@ kotlin {
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
             implementation("ch.qos.logback:logback-classic:1.5.6")
-            implementation("io.ktor:ktor-client-core:2.3.11")
-            implementation("io.ktor:ktor-client-cio:2.3.11")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
-            implementation("io.github.epicarchitect:calendar-compose-basis:1.0.5")
-            implementation("io.github.epicarchitect:calendar-compose-ranges:1.0.5") // includes basis
-            implementation("io.github.epicarchitect:calendar-compose-pager:1.0.5") // includes basis
-            implementation("io.github.epicarchitect:calendar-compose-datepicker:1.0.5") // includes pager + ranges
+            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.5.0")
         }
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
