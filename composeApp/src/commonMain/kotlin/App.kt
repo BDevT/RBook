@@ -1,3 +1,5 @@
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.ui.Alignment
@@ -6,19 +8,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material.Text
 import androidx.compose.material.Button
 import androidx.compose.runtime.*
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.*
-import kotlinx.datetime.LocalDate
 import kotlinx.serialization.Serializable
-import io.ktor.client.*
-import io.ktor.client.plugins.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.request.*
-import io.ktor.http.*
-import io.ktor.client.statement.*
 import kotlinx.serialization.json.Json
-import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.unit.IntSize
+import io.ktor.http.*
+import io.ktor.client.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import epicarchitect.calendar.compose.datepicker.EpicDatePicker
+import epicarchitect.calendar.compose.datepicker.state.EpicDatePickerState
+import epicarchitect.calendar.compose.datepicker.state.rememberEpicDatePickerState
+import kotlinx.datetime.LocalDate
 
 @Serializable
 data class Desk(
@@ -50,11 +52,17 @@ data class BookingRequest(val user: String, val booking_date: String) {
 fun App() {
     var deskList by remember { mutableStateOf(emptyList<Desk>()) }
     var bookings by remember { mutableStateOf(emptyList<Booking>()) }
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    val containerSize = IntSize(800, 800) // Fixed size of 800 x 800
 
-    LaunchedEffect(Unit) {
+    var calendarVisible by remember { mutableStateOf(false) }
+    val datePickerState = rememberEpicDatePickerState(
+        selectionMode = EpicDatePickerState.SelectionMode.Single(),
+        selectedDates = listOf(LocalDate(2024, 6, 18))
+    )
+
+    LaunchedEffect(datePickerState.selectedDates) {
         deskList = fetchDesks()
-        bookings = fetchBookings()
+        bookings = fetchBookings(datePickerState.selectedDates.firstOrNull() ?: LocalDate(2024, 6, 18))
     }
 
     MaterialTheme {
@@ -62,37 +70,79 @@ fun App() {
             topBar = {
                 TopAppBar(
                     title = { Text("Desk Booking System") },
+                    actions = {
+                        datePickerToggle(
+                            selectedDates = datePickerState.selectedDates,
+                            onDateClick = { calendarVisible = !calendarVisible }
+                        )
+                    }
                 )
             },
             content = { padding ->
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .onGloballyPositioned { coordinates ->
-                            containerSize = coordinates.size
-                        }
+                        .size(800.dp, 800.dp) // Set the size to 800 x 800 dp
+                        .padding(0.dp)
                 ) {
                     deskList.forEach { desk ->
-                        val isBooked = bookings.any { it.desk_id == desk.id }
-                        val offsetX = containerSize.width * desk.virtual_location_x
-                        val offsetY = containerSize.height * (1 - desk.virtual_location_y)
+                        val booking = bookings.find { it.desk_id == desk.id }
+                        val isBooked = booking != null
+                        val offsetX = (containerSize.width * desk.virtual_location_x) - (desk.width / 2)
+                        val offsetY = containerSize.height * (1 - desk.virtual_location_y) - (desk.length / 2)
                         deskItem(
                             desk = desk,
                             isBooked = isBooked,
-                            onBook = {
+                            onBook = { userName ->
                                 CoroutineScope(Dispatchers.Default).launch {
-                                    bookDesk(desk.id)
+                                    val selectedDate = datePickerState.selectedDates.firstOrNull() ?: LocalDate(2024, 6, 18)
+                                    bookDesk(desk.id, selectedDate, userName)
                                     deskList = fetchDesks()
-                                    bookings = fetchBookings()
+                                    bookings = fetchBookings(selectedDate)
                                 }
                             },
+                            onCancel = {
+                                CoroutineScope(Dispatchers.Default).launch {
+                                    val selectedDate = datePickerState.selectedDates.firstOrNull() ?: LocalDate(2024, 6, 18)
+                                    cancelBooking(desk.id, selectedDate)
+                                    deskList = fetchDesks()
+                                    bookings = fetchBookings(selectedDate)
+                                }
+                            },
+                            selectedDate = datePickerState.selectedDates.firstOrNull() ?: LocalDate(2024, 6, 18),
                             modifier = Modifier
                                 .offset(
                                     x = offsetX.dp,
                                     y = offsetY.dp
-                                )
+                                ),
+                            bookedBy = booking?.booked_by
                         )
+                    }
+
+                    if (calendarVisible) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.TopEnd
+                        ) {
+                            Card(
+                                modifier = Modifier.size(400.dp),
+                                elevation = 8.dp
+                            ) {
+                                Column {
+                                    EpicDatePicker(
+                                        state = datePickerState,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                    Button(
+                                        onClick = { calendarVisible = false },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp)
+                                    ) {
+                                        Text("Confirm")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -101,37 +151,125 @@ fun App() {
 }
 
 @Composable
-fun deskItem(desk: Desk, isBooked: Boolean, onBook: suspend () -> Unit, modifier: Modifier = Modifier) {
+fun datePickerToggle(
+    selectedDates: List<LocalDate>,
+    onDateClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onDateClick,
+        modifier = modifier
+    ) {
+        Text(
+            text = selectedDates.firstOrNull()?.let {
+                it.toString()
+            } ?: "Select Date"
+        )
+    }
+}
+
+@Composable
+fun deskItem(desk: Desk, isBooked: Boolean, onBook: suspend (String) -> Unit, onCancel: suspend () -> Unit, selectedDate: LocalDate, modifier: Modifier = Modifier, bookedBy: String? = null) {
+    val backgroundColor = if (isBooked) Color(0xFFFFCDD2) else Color(0xFFC8E6C9) // Light red for booked, light green for available
+    var showBookingDialog by remember { mutableStateOf(false) }
+    var showCancellationDialog by remember { mutableStateOf(false) }
+    var userName by remember { mutableStateOf("") }
+
     Card(
         modifier = modifier
-            .size(desk.length.dp * 100, desk.width.dp * 100)
-            .padding(0.dp),
+            .size(desk.width.dp, desk.length.dp)
+            .padding(0.dp)
+            .background(backgroundColor)
+            .clickable {
+                if (isBooked) {
+                    showCancellationDialog = true
+                } else {
+                    showBookingDialog = true
+                }
+            },
         elevation = 4.dp
     ) {
-        Column(
+        Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .fillMaxSize()
+                .background(backgroundColor)
         ) {
-            Text(text = desk.name, style = MaterialTheme.typography.h6)
             Text(
-                text = if (isBooked) "Booked" else "Available",
-                style = MaterialTheme.typography.body2,
-                color = if (isBooked) MaterialTheme.colors.error else MaterialTheme.colors.primary
+                text = desk.name,
+                style = MaterialTheme.typography.h6,
+                color = Color.Black
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = { CoroutineScope(Dispatchers.Default).launch { onBook() } }, enabled = !isBooked) {
-                Text(text = if (isBooked) "Booked" else "Book")
-            }
         }
+    }
+
+    if (showBookingDialog) {
+        AlertDialog(
+            onDismissRequest = { showBookingDialog = false },
+            title = { Text("Book Desk") },
+            text = {
+                Column {
+                    Text("Desk: ${desk.name}")
+                    Text("Date: $selectedDate")
+                    TextField(
+                        value = userName,
+                        onValueChange = { userName = it },
+                        label = { Text("Your Name") }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showBookingDialog = false
+                    CoroutineScope(Dispatchers.Default).launch {
+                        onBook(userName)
+                    }
+                }) {
+                    Text("Confirm")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showBookingDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showCancellationDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancellationDialog = false },
+            title = { Text("Cancel Booking") },
+            text = {
+                Column {
+                    Text("Desk: ${desk.name}")
+                    Text("Date: $selectedDate")
+                    Text("Booked by: ${bookedBy ?: "Unknown"}")
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showCancellationDialog = false
+                    CoroutineScope(Dispatchers.Default).launch {
+                        onCancel()
+                    }
+                }) {
+                    Text("Cancel Booking")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showCancellationDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 
 suspend fun fetchDesks(): List<Desk> {
     val client = HttpClient()
-
     return try {
-        val response: HttpResponse = client.get("http://localhost:8000/desks")
+        val response: HttpResponse = client.get("https://rbook-route-scp012-dxm01.apps.ocp.osprey.hartree.stfc.ac.uk/desks/")
         val responseBody: String = response.bodyAsText()
         Json.decodeFromString(responseBody)
     } catch (e: Exception) {
@@ -141,11 +279,11 @@ suspend fun fetchDesks(): List<Desk> {
     }
 }
 
-suspend fun fetchBookings(): List<Booking> {
+suspend fun fetchBookings(selectedDate: LocalDate): List<Booking> {
     val client = HttpClient()
-
     return try {
-        val response: HttpResponse = client.get("http://localhost:8000/bookings?booking_date=${getCurrentDate()}")
+        val formattedDate = selectedDate.toString()
+        val response: HttpResponse = client.get("https://rbook-route-scp012-dxm01.apps.ocp.osprey.hartree.stfc.ac.uk/bookings?booking_date=$formattedDate")
         val responseBody: String = response.bodyAsText()
         Json.decodeFromString(responseBody)
     } catch (e: Exception) {
@@ -155,29 +293,33 @@ suspend fun fetchBookings(): List<Booking> {
     }
 }
 
-fun getCurrentDate(): String {
-    return LocalDate(2024, 6, 16).toString()
-}
-
-suspend fun bookDesk(deskId: Int) {
-    val client = HttpClient() {
-        defaultRequest {
-            url("http://localhost:8000")
-        }
-        install(ContentNegotiation) {
-            Json { ignoreUnknownKeys = true }
-        }
-    }
-
+suspend fun bookDesk(deskId: Int, selectedDate: LocalDate, userName: String) {
+    val client = HttpClient()
     try {
-        val bookingRequest = BookingRequest("default_user", getCurrentDate())
+        val formattedDate = selectedDate.toString()
+        val bookingRequest = BookingRequest(userName, formattedDate)
         val bookingStr: String = bookingRequest.toJsonString()
-        println(bookingRequest.booking_date)
-        val response = client.post("/desks/$deskId/book") {
+        val response = client.post("https://rbook-route-scp012-dxm01.apps.ocp.osprey.hartree.stfc.ac.uk/desks/$deskId/book") {
             contentType(ContentType.Application.Json)
             setBody(bookingStr)
         }
         println("Booking response: $response")
+    } catch (e: Exception) {
+        println("Error: ${e.message}")
+    } finally {
+        client.close()
+    }
+}
+
+suspend fun cancelBooking(deskId: Int, selectedDate: LocalDate) {
+    val client = HttpClient()
+    try {
+        val formattedDate = selectedDate.toString()
+        val response = client.post("https://rbook-route-scp012-dxm01.apps.ocp.osprey.hartree.stfc.ac.uk/desks/$deskId/cancel") {
+            contentType(ContentType.Application.Json)
+            parameter("booking_date", formattedDate)
+        }
+        println("Cancellation response: $response")
     } catch (e: Exception) {
         println("Error: ${e.message}")
     } finally {
